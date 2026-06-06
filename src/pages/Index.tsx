@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Section = "home" | "games" | "profile" | "leaderboard" | "about";
@@ -313,39 +313,289 @@ function HomeSection({ onNavigate }: { onNavigate: (s: Section) => void }) {
   );
 }
 
+// ─── Clicker Game ─────────────────────────────────────────────────────────────
+const GAME_DURATION = 10;
+
+interface ClickEffect {
+  id: number;
+  x: number;
+  y: number;
+}
+
+interface ClickerRecord {
+  score: number;
+  time: string;
+}
+
+function ClickerGame({ catColor, onClose }: { catColor: CatColor; onClose: () => void }) {
+  const [phase, setPhase] = useState<"idle" | "countdown" | "playing" | "result">("idle");
+  const [countdown, setCountdown] = useState(3);
+  const [timeLeft, setTimeLeft] = useState(GAME_DURATION);
+  const [clicks, setClicks] = useState(0);
+  const [effects, setEffects] = useState<ClickEffect[]>([]);
+  const [records, setRecords] = useState<ClickerRecord[]>([]);
+  const [catScale, setCatScale] = useState(1);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const effectId = useRef(0);
+
+  const clearTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+  };
+
+  const startCountdown = useCallback(() => {
+    setPhase("countdown");
+    setCountdown(3);
+    let c = 3;
+    timerRef.current = setInterval(() => {
+      c -= 1;
+      if (c <= 0) {
+        clearTimer();
+        setPhase("playing");
+        setClicks(0);
+        setTimeLeft(GAME_DURATION);
+        let t = GAME_DURATION;
+        timerRef.current = setInterval(() => {
+          t -= 1;
+          setTimeLeft(t);
+          if (t <= 0) {
+            clearTimer();
+            setPhase("result");
+          }
+        }, 1000);
+      } else {
+        setCountdown(c);
+      }
+    }, 1000);
+  }, []);
+
+  useEffect(() => () => clearTimer(), []);
+
+  useEffect(() => {
+    if (phase === "result") {
+      setRecords(prev => {
+        const next = [{ score: clicks, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }) }, ...prev].slice(0, 5);
+        return next.sort((a, b) => b.score - a.score);
+      });
+    }
+  }, [phase, clicks]);
+
+  const handleCatClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (phase !== "playing") return;
+    setClicks(c => c + 1);
+    setCatScale(0.88);
+    setTimeout(() => setCatScale(1), 100);
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const id = effectId.current++;
+    setEffects(prev => [...prev, { id, x, y }]);
+    setTimeout(() => setEffects(prev => prev.filter(ef => ef.id !== id)), 700);
+  };
+
+  const urgencyColor = timeLeft <= 3 ? "#ff4444" : timeLeft <= 5 ? "#ffdd00" : "#00ffee";
+  const timerPct = (timeLeft / GAME_DURATION) * 100;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(5,4,15,0.96)", backdropFilter: "blur(8px)" }}>
+
+      <div className="relative w-full max-w-md" style={{ animation: "speech-pop 0.4s cubic-bezier(0.34,1.56,0.64,1) both" }}>
+        {/* Close */}
+        <button onClick={onClose}
+          className="absolute -top-4 -right-4 z-10 w-10 h-10 rounded-full bg-card border border-border text-foreground/60 hover:text-foreground transition-colors font-pixel text-xs">
+          ✕
+        </button>
+
+        <div className="bg-card rounded-3xl overflow-hidden neon-border-cyan">
+          {/* Header */}
+          <div className="px-6 pt-6 pb-4 text-center border-b border-border">
+            <div className="font-pixel text-xs text-neon-cyan tracking-widest mb-1">🐾 МИНИ-ИГРА</div>
+            <h2 className="font-pixel text-lg neon-text-pink">КЛИКЕР-КОТИК</h2>
+          </div>
+
+          <div className="p-6">
+            {/* IDLE */}
+            {phase === "idle" && (
+              <div className="text-center" style={{ animation: "slide-up-fade 0.4s ease-out both" }}>
+                <div className="text-6xl mb-4" style={{ animation: "float 3s ease-in-out infinite" }}>🐱</div>
+                <p className="text-foreground/70 mb-2 leading-relaxed">
+                  Кликай на котика как можно быстрее!
+                </p>
+                <p className="font-pixel text-xs text-neon-yellow mb-6">У тебя есть {GAME_DURATION} секунд</p>
+                <button onClick={startCountdown}
+                  className="font-pixel text-xs px-10 py-4 rounded-xl transition-all hover:scale-105 active:scale-95"
+                  style={{ background: "var(--neon-pink)", color: "hsl(240 20% 6%)", boxShadow: "0 0 24px #ff44cc80" }}>
+                  СТАРТ!
+                </button>
+
+                {records.length > 0 && (
+                  <div className="mt-6 bg-muted rounded-2xl p-4">
+                    <div className="font-pixel text-xs text-neon-yellow mb-3">🏆 МОИ РЕКОРДЫ</div>
+                    {records.map((r, i) => (
+                      <div key={i} className="flex justify-between items-center py-1.5 border-b border-border/40 last:border-0">
+                        <span className="text-foreground/50 text-xs">{i + 1}. {r.time}</span>
+                        <span className="font-pixel text-xs" style={{ color: i === 0 ? "#ffdd00" : "#fff" }}>
+                          {r.score} кликов
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* COUNTDOWN */}
+            {phase === "countdown" && (
+              <div className="text-center py-8" style={{ animation: "intro-cat 0.3s ease-out both" }}>
+                <div className="font-pixel text-8xl neon-text-pink" key={countdown}
+                  style={{ animation: "intro-cat 0.4s cubic-bezier(0.34,1.56,0.64,1) both" }}>
+                  {countdown}
+                </div>
+                <p className="font-pixel text-xs text-neon-cyan mt-4 tracking-widest">ПРИГОТОВЬСЯ!</p>
+              </div>
+            )}
+
+            {/* PLAYING */}
+            {phase === "playing" && (
+              <div className="text-center">
+                {/* Timer bar */}
+                <div className="mb-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-pixel text-xs text-foreground/50">ВРЕМЯ</span>
+                    <span className="font-pixel text-lg" style={{ color: urgencyColor,
+                      textShadow: `0 0 10px ${urgencyColor}` }}>
+                      {timeLeft}с
+                    </span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-1000"
+                      style={{ width: `${timerPct}%`, background: urgencyColor,
+                        boxShadow: `0 0 8px ${urgencyColor}` }} />
+                  </div>
+                </div>
+
+                {/* Score */}
+                <div className="font-pixel text-4xl neon-text-pink mb-5">{clicks}</div>
+
+                {/* Cat button */}
+                <button
+                  onClick={handleCatClick}
+                  className="relative mx-auto block select-none outline-none"
+                  style={{ transform: `scale(${catScale})`, transition: "transform 0.08s ease" }}
+                >
+                  <CatSVG color={CAT_COLORS[catColor].body} size={150} />
+                  {effects.map(ef => (
+                    <span key={ef.id} className="absolute pointer-events-none font-pixel text-xs text-neon-yellow"
+                      style={{
+                        left: ef.x, top: ef.y,
+                        animation: "meow-bounce 0.6s ease-out both",
+                        transform: "translate(-50%, -50%)",
+                      }}>+1</span>
+                  ))}
+                </button>
+
+                <p className="font-pixel text-xs text-foreground/30 mt-3 tracking-widest">ЖМИ!</p>
+              </div>
+            )}
+
+            {/* RESULT */}
+            {phase === "result" && (
+              <div className="text-center" style={{ animation: "intro-cat 0.5s cubic-bezier(0.34,1.56,0.64,1) both" }}>
+                <div className="text-5xl mb-2">
+                  {clicks >= 60 ? "🏆" : clicks >= 40 ? "🥈" : clicks >= 20 ? "🥉" : "😸"}
+                </div>
+                <p className="font-pixel text-xs text-neon-cyan tracking-widest mb-1">РЕЗУЛЬТАТ</p>
+                <div className="font-pixel text-6xl neon-text-pink mb-1">{clicks}</div>
+                <p className="font-pixel text-xs text-foreground/50 mb-1">КЛИКОВ ЗА {GAME_DURATION} СЕК</p>
+
+                <div className="my-4 py-3 px-4 rounded-xl bg-muted">
+                  <p className="font-pixel text-xs" style={{
+                    color: clicks >= 60 ? "#ffdd00" : clicks >= 40 ? "#00ffee" : clicks >= 20 ? "#44ff88" : "#ff44cc"
+                  }}>
+                    {clicks >= 60 ? "🔥 НЕВЕРОЯТНО! ТЫ — ЛЕГЕНДА!" :
+                     clicks >= 40 ? "⚡ ОТЛИЧНЫЙ РЕЗУЛЬТАТ!" :
+                     clicks >= 20 ? "👍 НЕПЛОХО, ЕЩЁ РАЗ?" :
+                     "😅 ТРЕНИРУЙСЯ, КОТИК!"}
+                  </p>
+                </div>
+
+                <div className="flex gap-3 justify-center">
+                  <button onClick={startCountdown}
+                    className="font-pixel text-xs px-6 py-3 rounded-xl transition-all hover:scale-105 active:scale-95"
+                    style={{ background: "var(--neon-pink)", color: "hsl(240 20% 6%)" }}>
+                    ЕЩЁ РАЗ
+                  </button>
+                  <button onClick={() => setPhase("idle")}
+                    className="font-pixel text-xs px-6 py-3 rounded-xl neon-border-cyan text-neon-cyan transition-all hover:scale-105 hover:bg-neon-cyan/5">
+                    РЕКОРДЫ
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Games ────────────────────────────────────────────────────────────────────
-function GamesSection() {
+function GamesSection({ catColor }: { catColor: CatColor }) {
+  const [activeGame, setActiveGame] = useState<number | null>(null);
+
   return (
     <div className="min-h-screen px-4 py-24 max-w-5xl mx-auto">
+      {activeGame === 4 && (
+        <ClickerGame catColor={catColor} onClose={() => setActiveGame(null)} />
+      )}
+
       <div className="text-center mb-12" style={{ animation: "slide-up-fade 0.5s ease-out both" }}>
         <div className="font-pixel text-xs text-neon-cyan tracking-widest mb-3">🎮 КАТАЛОГ</div>
         <h2 className="font-pixel text-3xl neon-text-pink">ИГРЫ</h2>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {GAMES.map((game, i) => (
-          <div key={game.id}
-            className="bg-card rounded-2xl p-6 border border-border hover:scale-[1.03] transition-all duration-300 cursor-pointer group relative overflow-hidden"
-            style={{ animation: `slide-up-fade 0.4s ${i * 0.08}s ease-out both` }}
-          >
-            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"
-              style={{ background: `radial-gradient(circle at 50% 0%, ${game.color}18, transparent 70%)` }} />
-
-            <div className="text-5xl mb-4">{game.emoji}</div>
-            <h3 className="font-pixel text-xs mb-2" style={{ color: game.color }}>{game.title}</h3>
-            <p className="text-foreground/60 text-sm mb-4 leading-relaxed">{game.desc}</p>
-            <div className="flex justify-between text-xs text-foreground/40 mb-4">
-              <span>🏆 {game.score}</span>
-              <span>👥 {game.players}</span>
-            </div>
-            <button
-              className="w-full py-2.5 rounded-xl font-pixel text-xs transition-all hover:opacity-90 active:scale-95"
-              style={{ background: game.color, color: "hsl(240 20% 6%)" }}
+        {GAMES.map((game, i) => {
+          const isPlayable = game.id === 4;
+          return (
+            <div key={game.id}
+              className="bg-card rounded-2xl p-6 border border-border hover:scale-[1.03] transition-all duration-300 cursor-pointer group relative overflow-hidden"
+              style={{ animation: `slide-up-fade 0.4s ${i * 0.08}s ease-out both` }}
             >
-              ИГРАТЬ
-            </button>
-          </div>
-        ))}
+              {isPlayable && (
+                <div className="absolute top-3 right-3 font-pixel text-xs px-2 py-0.5 rounded-full"
+                  style={{ background: "#44ff8822", color: "#44ff88", border: "1px solid #44ff8844" }}>
+                  ДОСТУПНА
+                </div>
+              )}
+
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"
+                style={{ background: `radial-gradient(circle at 50% 0%, ${game.color}18, transparent 70%)` }} />
+
+              <div className="text-5xl mb-4">{game.emoji}</div>
+              <h3 className="font-pixel text-xs mb-2" style={{ color: game.color }}>{game.title}</h3>
+              <p className="text-foreground/60 text-sm mb-4 leading-relaxed">{game.desc}</p>
+              <div className="flex justify-between text-xs text-foreground/40 mb-4">
+                <span>🏆 {game.score}</span>
+                <span>👥 {game.players}</span>
+              </div>
+              <button
+                onClick={() => isPlayable && setActiveGame(game.id)}
+                className="w-full py-2.5 rounded-xl font-pixel text-xs transition-all active:scale-95"
+                style={{
+                  background: isPlayable ? game.color : "hsl(var(--muted))",
+                  color: isPlayable ? "hsl(240 20% 6%)" : "hsl(var(--muted-foreground))",
+                  opacity: isPlayable ? 1 : 0.5,
+                  cursor: isPlayable ? "pointer" : "default",
+                  boxShadow: isPlayable ? `0 0 16px ${game.color}60` : "none",
+                }}
+              >
+                {isPlayable ? "ИГРАТЬ" : "СКОРО"}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -604,7 +854,7 @@ export default function Index() {
 
           <main className="pt-14">
             {section === "home"        && <HomeSection onNavigate={navigate} />}
-            {section === "games"       && <GamesSection />}
+            {section === "games"       && <GamesSection catColor={catColor} />}
             {section === "leaderboard" && <LeaderboardSection />}
             {section === "profile"     && (
               <ProfileSection
